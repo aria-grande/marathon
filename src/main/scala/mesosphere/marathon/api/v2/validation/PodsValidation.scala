@@ -1,11 +1,11 @@
-package mesosphere.marathon.api.v2.validation
+package mesosphere.marathon
+package api.v2.validation
 
 // scalastyle:off
 import java.util.regex.Pattern
 
 import com.wix.accord.dsl._
 import com.wix.accord._
-import mesosphere.marathon.Features
 import mesosphere.marathon.api.v2.Validation
 import mesosphere.marathon.raml.{ ArgvCommand, Artifact, CommandHealthCheck, Constraint, Endpoint, EnvVarSecretRef, EnvVarValueOrSecret, FixedPodScalingPolicy, HealthCheck, HttpHealthCheck, Image, ImageType, Lifecycle, Network, NetworkMode, Pod, PodContainer, PodPlacementPolicy, PodScalingPolicy, PodSchedulingBackoffStrategy, PodSchedulingPolicy, PodUpgradeStrategy, Resources, SecretDef, ShellCommand, TcpHealthCheck, Volume, VolumeMount }
 import mesosphere.marathon.state.{ PathId, ResourceRole }
@@ -20,49 +20,18 @@ import scala.util.Try
 @SuppressWarnings(Array("all")) // wix breaks stuff
 trait PodsValidation {
   import Validation._
+  import NameValidation._
+  import NetworkValidation._
 
-  val NamePattern = """^[a-z0-9]([-a-z0-9]*[a-z0-9])?$""".r
   val EnvVarNamePattern = """^[A-Z_][A-Z0-9_]*$""".r
 
-  val validName: Validator[String] = validator[String] { name =>
-    name should matchRegexWithFailureMessage(
-      NamePattern,
-      "must contain only alphanumeric chars or hyphens, and must begin with a letter")
-    name.length should be > 0
-    name.length should be < 64
-  }
-
-  val validEnvVarName: Validator[String] = validator[String] { name =>
+ val validEnvVarName: Validator[String] = validator[String] { name =>
     name should matchRegexWithFailureMessage(
       EnvVarNamePattern,
       "must contain only alphanumeric chars or underscore, and must not begin with a number")
     name.length should be > 0
     name.length should be < 255
   }
-
-  val networkValidator: Validator[Network] = validator[Network] { network =>
-    network.name.each is valid(validName)
-  }
-
-  val networksValidator: Validator[Seq[Network]] =
-    isTrue[Seq[Network]]("Host networks may not have names or labels") { nets =>
-      !nets.filter(_.mode == NetworkMode.Host).exists { n =>
-        val hasName = n.name.fold(false){ _.nonEmpty }
-        val hasLabels = n.labels.nonEmpty
-        hasName || hasLabels
-      }
-    } and isTrue[Seq[Network]]("Duplicate networks are not allowed") { nets =>
-      // unnamed CT nets pick up the default virtual net name
-      val unnamedAtMostOnce = nets.count { n => n.name.isEmpty && n.mode == NetworkMode.Container } < 2
-      val realNamesAtMostOnce: Boolean = !nets.flatMap(_.name).groupBy(name => name).exists(_._2.size > 1)
-      unnamedAtMostOnce && realNamesAtMostOnce
-    } and
-      isTrue[Seq[Network]]("Must specify either a single host network, or else 1-to-n container networks") { nets =>
-        val countsByMode = nets.groupBy { net => net.mode }.mapValues(_.size)
-        val hostNetworks = countsByMode.getOrElse(NetworkMode.Host, 0)
-        val containerNetworks = countsByMode.getOrElse(NetworkMode.Container, 0)
-        (hostNetworks == 1 && containerNetworks == 0) || (hostNetworks == 0 && containerNetworks > 0)
-      }
 
   def envValidator(pod: Pod, enabledFeatures: Set[String]) = validator[Map[String, EnvVarValueOrSecret]] { env =>
     env.keys is every(validEnvVarName)
@@ -303,8 +272,8 @@ trait PodsValidation {
       names.distinct.size == names.size
     }
     pod.secrets is empty or (valid(secretValidator) and featureEnabled(enabledFeatures, Features.SECRETS))
-    pod.networks is valid(networksValidator)
-    pod.networks is every(networkValidator)
+    pod.networks is valid(ramlNetworksValidator)
+    pod.networks is every(ramlNetworkValidator)
     pod.scheduling is optional(schedulingValidator)
     pod.scaling is optional(scalingValidator)
     pod is isTrue("Endpoint names are unique") { pod: Pod =>

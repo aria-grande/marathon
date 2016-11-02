@@ -99,7 +99,7 @@ sealed trait Task {
 
   def effectiveIpAddress(runSpec: RunSpec): Option[String] =
     runSpec match {
-      case app: AppDefinition if app.ipAddress.isDefined =>
+      case app: AppDefinition if app.usesNonHostNetworking =>
         status.ipAddresses.flatMap(_.headOption).map(_.getIpAddress)
 
       // TODO(PODS) extract ip address from launched task

@@ -7,6 +7,7 @@ trait NetworkConversion {
     Reads { raml =>
       raml.mode match {
         case NetworkMode.Host => pod.HostNetwork
+        case NetworkMode.ContainerBridge => pod.BridgeNetwork(raml.labels)
         case NetworkMode.Container => pod.ContainerNetwork(
           // TODO(PODS): shouldn't this be caught by validation?
           raml.name.getOrElse(throw new IllegalArgumentException("container network must specify a name")),
@@ -21,6 +22,11 @@ trait NetworkConversion {
         name = Some(cnet.name),
         mode = NetworkMode.Container,
         labels = cnet.labels
+      )
+    case br: pod.BridgeNetwork =>
+      Network(
+        mode = NetworkMode.ContainerBridge,
+        labels = br.labels
       )
     case pod.HostNetwork => Network(mode = NetworkMode.Host)
   }

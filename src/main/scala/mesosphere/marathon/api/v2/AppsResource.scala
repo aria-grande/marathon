@@ -69,15 +69,7 @@ class AppsResource @Inject() (
     @Context req: HttpServletRequest): Response = authenticated(req) { implicit identity =>
     withValid(Json.parse(body).as[AppDefinition].withCanonizedIds()) { appDef =>
       val now = clock.now()
-      val app = appDef.copy(
-        ipAddress = appDef.ipAddress.map { ipAddress =>
-          config.defaultNetworkName.get.collect {
-            case (defaultName: String) if defaultName.nonEmpty && ipAddress.networkName.isEmpty =>
-              ipAddress.copy(networkName = Some(defaultName))
-          }.getOrElse(ipAddress)
-        },
-        versionInfo = VersionInfo.OnlyVersion(now)
-      )
+      val app = appDef.copy(versionInfo = VersionInfo.OnlyVersion(now))
 
       checkAuthorization(CreateRunSpec, app)
 

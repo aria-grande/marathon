@@ -10,7 +10,7 @@ import mesosphere.marathon.core.event._
 import mesosphere.marathon.core.health._
 import mesosphere.marathon.core.instance.Instance
 import mesosphere.marathon.core.plugin.{ PluginDefinition, PluginDefinitions }
-import mesosphere.marathon.core.pod.PodDefinition
+import mesosphere.marathon.core.pod.{ Network, PodDefinition }
 import mesosphere.marathon.core.readiness.ReadinessCheck
 import mesosphere.marathon.core.task.Task
 import mesosphere.marathon.raml.{ Pod, Raml, Resources }
@@ -48,6 +48,16 @@ object Formats extends Formats {
         _.seconds,
         _.toSeconds
       )
+  }
+
+  /** legacy API type that's only here for backwards compatibility of deserialization */
+  case class IpAddress(
+    groups: Seq[String] = Seq.empty,
+    labels: Map[String, String] = Map.empty[String, String],
+    discoveryInfo: DiscoveryInfo = DiscoveryInfo.empty,
+    networkName: Option[String] = None) {
+
+    def toNetworkAndPortMappings(): (Network, Seq[Container.PortMapping]) = ??? // TODO(jdef)
   }
 }
 
@@ -300,7 +310,7 @@ trait ContainerFormats {
     implicit lazy val DockerContainerParametersFormat: Format[DockerContainerParameters] = (
       (__ \ "image").format[String] ~
       (__ \ "network").formatNullable[DockerInfo.Network] ~
-      (__ \ "portMappings").formatNullable[Seq[Container.PortMapping]].withDefault(Nil) ~
+      (__ \ "portMappings").formatNullable[Seq[Container.PortMapping]].withDefault(Nil) ~ // deprecated
       (__ \ "privileged").formatNullable[Boolean].withDefault(false) ~
       (__ \ "parameters").formatNullable[Seq[Parameter]].withDefault(Seq.empty) ~
       (__ \ "credential").formatNullable[Container.Credential] ~
@@ -324,6 +334,7 @@ trait ContainerFormats {
     def container(
       `type`: mesos.ContainerInfo.Type,
       volumes: Seq[Volume],
+        // TODO(portMapping)
       docker: Option[DockerContainerParameters],
       appc: Option[AppcContainerParameters]): Container = {
       docker match {
@@ -344,6 +355,7 @@ trait ContainerFormats {
               docker.get.image,
               docker.get.credential,
               docker.get.forcePullImage
+              // TODO(portMapping)
             )
           }
         case _ =>
@@ -359,6 +371,7 @@ trait ContainerFormats {
                 a.id,
                 a.labels,
                 a.forcePullImage
+                // TODO(portMapping)
               )
             case _ =>
               Container.Mesos(volumes)
@@ -385,8 +398,6 @@ trait ContainerFormats {
     lazy val DockerContainerWrites: Writes[Container.Docker] = Writes { docker =>
       def dockerValues(d: Container.Docker): JsObject = Json.obj(
         "image" -> d.image,
-        "network" -> d.network,
-        "portMappings" -> d.portMappings,
         "privileged" -> d.privileged,
         "parameters" -> d.parameters,
         "forcePullImage" -> d.forcePullImage
@@ -394,6 +405,7 @@ trait ContainerFormats {
       Json.obj(
         "type" -> mesos.ContainerInfo.Type.DOCKER,
         "volumes" -> docker.volumes,
+        "portMappings" -> docker.portMappings,
         "docker" -> dockerValues(docker)
       )
     }
@@ -407,6 +419,7 @@ trait ContainerFormats {
       Json.obj(
         "type" -> mesos.ContainerInfo.Type.MESOS,
         "volumes" -> m.volumes,
+        "portMappings" -> m.portMappings,
         "docker" -> dockerValues(m)
       )
     }
@@ -421,6 +434,7 @@ trait ContainerFormats {
       Json.obj(
         "type" -> mesos.ContainerInfo.Type.MESOS,
         "volumes" -> appc.volumes,
+        "portMappings" -> appc.portMappings,
         "appc" -> appcValues(appc)
       )
     }
@@ -991,7 +1005,8 @@ trait AppAndGroupFormats {
             maybePortDefinitions: Option[Seq[PortDefinition]],
             readinessChecks: Seq[ReadinessCheck],
             secrets: Map[String, Secret],
-            maybeTaskKillGracePeriod: Option[FiniteDuration]) {
+            maybeTaskKillGracePeriod: Option[FiniteDuration],
+            networks: Seq[raml.Network]) {
           def upgradeStrategyOrDefault: UpgradeStrategy = {
             import UpgradeStrategy.{ empty, forResidentTasks }
             upgradeStrategy.getOrElse {
@@ -1016,10 +1031,10 @@ trait AppAndGroupFormats {
             (__ \ "version").readNullable[Timestamp].withDefault(Timestamp.now()) ~
             (__ \ "residency").readNullable[Residency] ~
             (__ \ "portDefinitions").readNullable[Seq[PortDefinition]] ~
-            (__ \ "readinessChecks").readNullable[Seq[ReadinessCheck]].withDefault(
-              AppDefinition.DefaultReadinessChecks) ~
+            (__ \ "readinessChecks").readNullable[Seq[ReadinessCheck]].withDefault(AppDefinition.DefaultReadinessChecks) ~
             (__ \ "secrets").readNullable[Map[String, Secret]].withDefault(AppDefinition.DefaultSecrets) ~
-            (__ \ "taskKillGracePeriodSeconds").readNullable[Long].map(_.map(_.seconds))
+            (__ \ "taskKillGracePeriodSeconds").readNullable[Long].map(_.map(_.seconds)) ~
+            (__ \ "networks").readNullable[Seq[raml.Network]].withDefault(Seq.empty[raml.Network])
           )(ExtraFields)
             .filter(ValidationError("You cannot specify both uris and fetch fields")) { extra =>
               !(extra.uris.nonEmpty && extra.fetch.nonEmpty)
@@ -1032,6 +1047,10 @@ trait AppAndGroupFormats {
               val portDefinitionsIsEquivalentToPorts = extra.maybePortDefinitions.map(_.map(_.port)) == extra.maybePorts
               portDefinitionsIsEquivalentToPorts || extra.maybePorts.isEmpty || extra.maybePortDefinitions.isEmpty
             }
+            .filter(ValidationError("Must not specify both networks and ipAddress")) { extra =>
+              !(extra.ipAddress.nonEmpty && extra.networks.nonEmpty)
+            }
+            // TODO(portMapping) must not specify container.docker.network and networks
 
         extraReads.map { extra =>
           def fetch: Seq[FetchUri] =
@@ -1050,6 +1069,12 @@ trait AppAndGroupFormats {
               }
           }
 
+          def genNetworks: Seq[Network] = extra.ipAddress match {
+            // TODO(portMapping) need to deal with default_network_name parameter here
+            case Some(ipAddress) => ??? // TODO(portMapping) convert ipAddress to pod.Network
+            case None => ??? // TODO(portMapping) convert all raml.Network to pod.Network
+          }
+
           app.copy(
             fetch = fetch,
             dependencies = extra.dependencies,
@@ -1057,7 +1082,7 @@ trait AppAndGroupFormats {
             upgradeStrategy = extra.upgradeStrategyOrDefault,
             labels = extra.labels,
             acceptedResourceRoles = extra.acceptedResourceRoles,
-            ipAddress = extra.ipAddress,
+            networks = genNetworks,
             versionInfo = VersionInfo.OnlyVersion(extra.version),
             residency = extra.residencyOrDefault,
             readinessChecks = extra.readinessChecks,
@@ -1173,7 +1198,7 @@ trait AppAndGroupFormats {
         "dependencies" -> runSpec.dependencies,
         "upgradeStrategy" -> runSpec.upgradeStrategy,
         "labels" -> runSpec.labels,
-        "ipAddress" -> runSpec.ipAddress,
+        "networks" -> runSpec.networks.map(Raml.toRaml(_)),
         "version" -> runSpec.version,
         "residency" -> runSpec.residency,
         "secrets" -> runSpec.secrets,
@@ -1185,7 +1210,7 @@ trait AppAndGroupFormats {
       }
 
       // top-level ports fields are incompatible with IP/CT
-      if (runSpec.ipAddress.isEmpty) {
+      if (!runSpec.usesNonHostNetworking) {
         appJson = appJson ++ Json.obj(
           "ports" -> runSpec.servicePorts,
           "portDefinitions" -> {
@@ -1355,7 +1380,8 @@ trait AppAndGroupFormats {
         portDefinitions: Option[Seq[PortDefinition]],
         readinessChecks: Option[Seq[ReadinessCheck]],
         secrets: Option[Map[String, Secret]],
-        taskKillGracePeriodSeconds: Option[FiniteDuration])
+        taskKillGracePeriodSeconds: Option[FiniteDuration],
+        networks: Option[Seq[raml.Network]])
 
       val extraReads: Reads[ExtraFields] =
         (
@@ -1371,10 +1397,11 @@ trait AppAndGroupFormats {
           (__ \ "portDefinitions").readNullable[Seq[PortDefinition]] ~
           (__ \ "readinessChecks").readNullable[Seq[ReadinessCheck]] ~
           (__ \ "secrets").readNullable[Map[String, Secret]] ~
-          (__ \ "taskKillGracePeriodSeconds").readNullable[Long].map(_.map(_.seconds))
+          (__ \ "taskKillGracePeriodSeconds").readNullable[Long].map(_.map(_.seconds)) ~
+          (__ \ "networks").readNullable[Seq[raml.Network]]
         )(ExtraFields)
 
-      extraReads
+     extraReads
         .filter(ValidationError("You cannot specify both uris and fetch fields")) { extra =>
           !(extra.uris.nonEmpty && extra.fetch.nonEmpty)
         }
@@ -1382,13 +1409,25 @@ trait AppAndGroupFormats {
           val portDefinitionsIsEquivalentToPorts = extra.portDefinitions.map(_.map(_.port)) == extra.ports
           portDefinitionsIsEquivalentToPorts || extra.ports.isEmpty || extra.portDefinitions.isEmpty
         }
+        .filter(ValidationError("Must not specify both networks and ipAddress")) { extra =>
+          !(extra.ipAddress.nonEmpty && extra.networks.nonEmpty)
+        }
+        // TODO(portMapping) must not specify container.docker.network and networks
         .map { extra =>
-          update.copy(
+
+           /** sync with [[AppDefinitionReads]] **/
+           def genNetworks: Option[Seq[Network]] = extra.ipAddress match {
+             // TODO(portMapping) need to deal with default_network_name parameter here
+             case Some(ipAddress) => ??? // TODO(portMapping) convert ipAddress to pod.Network
+             case None => ??? // TODO(portMapping) convert all raml.Network to pod.Network
+           }
+
+           update.copy(
             upgradeStrategy = extra.upgradeStrategy,
             labels = extra.labels,
             version = extra.version,
             acceptedResourceRoles = extra.acceptedResourceRoles,
-            ipAddress = extra.ipAddress,
+            networks = genNetworks,
             fetch = extra.fetch.orElse(extra.uris.map { seq => seq.map(FetchUri.apply(_)) }),
             residency = extra.residency,
             portDefinitions = extra.portDefinitions.orElse {

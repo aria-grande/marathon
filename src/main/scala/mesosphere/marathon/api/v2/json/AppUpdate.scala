@@ -1,12 +1,13 @@
-package mesosphere.marathon.api.v2.json
+package mesosphere.marathon
+package api.v2.json
 
 import com.wix.accord.Validator
 import com.wix.accord.dsl._
-import mesosphere.marathon.Features
 import mesosphere.marathon.Protos.Constraint
 import mesosphere.marathon.api.v2.Validation._
 import mesosphere.marathon.core.readiness.ReadinessCheck
 import mesosphere.marathon.core.health.HealthCheck
+import mesosphere.marathon.core.pod.Network
 import mesosphere.marathon.raml.Resources
 import mesosphere.marathon.state._
 
@@ -71,7 +72,7 @@ case class AppUpdate(
 
     version: Option[Timestamp] = None,
 
-    ipAddress: Option[IpAddress] = None,
+    networks: Option[Seq[Network]] = None,
 
     residency: Option[Residency] = None,
 
@@ -137,7 +138,7 @@ case class AppUpdate(
     upgradeStrategy = upgradeStrategy.getOrElse(app.upgradeStrategy),
     labels = labels.getOrElse(app.labels),
     acceptedResourceRoles = acceptedResourceRoles.getOrElse(app.acceptedResourceRoles),
-    ipAddress = ipAddress.orElse(app.ipAddress),
+    networks = networks.getOrElse(app.networks),
     // The versionInfo may never be overridden by an AppUpdate.
     // Setting the version in AppUpdate means that the user wants to revert to that version. In that
     // case, we do not update the current AppDefinition but revert completely to the specified version.
