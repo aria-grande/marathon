@@ -345,7 +345,8 @@ object MarathonSchedulerActor {
     launchQueue: LaunchQueue,
     marathonSchedulerDriverHolder: MarathonSchedulerDriverHolder,
     electionService: ElectionService,
-    eventBus: EventStream)(implicit mat: Materializer): Props = {
+    eventBus: EventStream,
+    cancellationTimeout: FiniteDuration = 1.minute)(implicit mat: Materializer): Props = {
     Props(new MarathonSchedulerActor(
       createSchedulerActions,
       deploymentManagerProps,
@@ -356,7 +357,8 @@ object MarathonSchedulerActor {
       launchQueue,
       marathonSchedulerDriverHolder,
       electionService,
-      eventBus
+      eventBus,
+      cancellationTimeout
     ))
   }
 
