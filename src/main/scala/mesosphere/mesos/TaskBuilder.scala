@@ -192,7 +192,7 @@ class TaskBuilder(
 
       // Set NetworkInfo if necessary
       runSpec.networks.foreach { network =>
-        def generateLabels(from: Map[String,String]): Labels = Labels.newBuilder().addAllLabels(from.map {
+        def generateLabels(from: Map[String, String]): Labels = Labels.newBuilder().addAllLabels(from.map {
           case (key, value) => Label.newBuilder.setKey(key).setValue(value).build()
         }).build()
 
@@ -251,7 +251,7 @@ object TaskBuilder {
 
   val log = LoggerFactory.getLogger(getClass)
 
-  val MesosBridgeName = "mesos-bridge"
+  val MesosBridgeName = "mesos-bridge" // TODO(jdef) move this somewhere more common (mesosphere.mesos.Networking?)
 
   def commandInfo(
     runSpec: AppDefinition,
