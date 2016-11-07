@@ -67,9 +67,9 @@ types:
     usage: Must specify a single type of check, http, tcp, or exec
   AppHealthCheckProtocol:
     type: string
-    enum: [HTTP, HTTPS, TCP, COMMAND]
+    enum: [HTTP, HTTPS, TCP, COMMAND, MESOS_HTTP, MESOS_HTTPS, MESOS_TCP]
     description: |
-      Protocol of the requests to be performed. One of HTTP, HTTPS, TCP or COMMAND.
+      Protocol of the requests to be performed.
   CommandCheckItems:
     type: object
     properties:

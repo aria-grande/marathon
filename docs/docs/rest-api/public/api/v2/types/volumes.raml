@@ -28,14 +28,35 @@ types:
         description: The path inside the container at which the volume is mounted.
       readOnly?:
         type: boolean
+  PersistentVolumeType:
+    type: string
+    description: The type of mesos disk resource to use; defaults to root
+    enum: [ root, path, mount ]
+  PersistentVolumeConstraint:
+    type: array
+    items: string
+    minItems: 3
+    maxItems: 3
   PersistentVolume:
     type: object
     properties:
+      type?:
+        type: PersistentVolumeType
       size:
         type: integer
         format: int32
         minimum: 0
         description: The size of the persistence volume in MB.
+      maxSize?:
+        type: integer
+        format: int32
+        minimum: 0
+        description: |
+          Optional maximum size of an exclusive mount-disk resource to consider; does
+          not apply to root or path disk resource types.
+      constraints?:
+        type: array
+        items: PersistentVolumeConstraint
   ExternalVolume:
     type: object
     properties:
