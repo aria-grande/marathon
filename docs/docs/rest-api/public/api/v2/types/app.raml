@@ -197,7 +197,12 @@ types:
         minimum: 0
         description: |
           The amount of GPU cores that is needed for the application per instance.
-      ipAddress?: network.IpAddress
+      ipAddress?:
+        type: network.IpAddress
+        description: deprecated in favor of App.networks
+      networks?:
+        type: array
+        items: network.Network
       ports?:
         type: array
         items: number.EphemeralPort
