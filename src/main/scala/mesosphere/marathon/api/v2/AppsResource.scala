@@ -10,6 +10,7 @@ import javax.ws.rs.core.{ Context, MediaType, Response }
 import akka.event.EventStream
 import com.codahale.metrics.annotation.Timed
 import mesosphere.marathon.api.v2.Validation._
+import mesosphere.marathon.api.v2.validation.AppValidation
 import mesosphere.marathon.api.v2.json.AppUpdate
 import mesosphere.marathon.api.v2.json.Formats._
 import mesosphere.marathon.api.{ AuthResource, MarathonMediaType, RestResource }
@@ -19,6 +20,7 @@ import mesosphere.marathon.core.event.ApiPostEvent
 import mesosphere.marathon.core.group.GroupManager
 import mesosphere.marathon.core.plugin.PluginManager
 import mesosphere.marathon.plugin.auth._
+import mesosphere.marathon.raml.Raml
 import mesosphere.marathon.state.PathId._
 import mesosphere.marathon.state._
 import mesosphere.marathon.stream._
@@ -43,7 +45,12 @@ class AppsResource @Inject() (
 
   private[this] val ListApps = """^((?:.+/)|)\*$""".r
   implicit lazy val appDefinitionValidator = AppDefinition.validAppDefinition(config.availableFeatures)(pluginManager)
-  implicit lazy val appUpdateValidator = AppUpdate.appUpdateValidator(config.availableFeatures)
+  implicit lazy val appUpdateValidator = AppValidation.appUpdateValidator(config.availableFeatures)
+
+  def preprocess(ra: raml.AppUpdate): raml.AppUpdate = {
+    val withUpdatedContainer = ra.container.map(ct => ra.copy(container = Some(AppNormalization.normalizeDocker(ct)))).getOrElse(ra)
+    AppNormalization(Validation.validateOrThrow(withUpdatedContainer))
+  }
 
   @GET
   @Timed
@@ -67,7 +74,9 @@ class AppsResource @Inject() (
     body: Array[Byte],
     @DefaultValue("false")@QueryParam("force") force: Boolean,
     @Context req: HttpServletRequest): Response = authenticated(req) { implicit identity =>
-    withValid(Json.parse(body).as[AppDefinition].withCanonizedIds()) { appDef =>
+
+    val rawApp: AppDefinition = Raml.fromRaml(AppsResource.preprocess(Json.parse(body).as[raml.App]))
+    withValid(rawApp.withCanonizedIds()) { appDef =>
       val now = clock.now()
       val app = appDef.copy(versionInfo = VersionInfo.OnlyVersion(now))
 
@@ -144,7 +153,8 @@ class AppsResource @Inject() (
     val appId = id.toRootPath
     val now = clock.now()
 
-    withValid(Json.parse(body).as[AppUpdate].copy(id = Some(appId))) { appUpdate =>
+    val appUpdate = preprocess(Json.parse(body).as[raml.AppUpdate])
+    withValid(appUpdate.copy(id = Some(appId.toString))) { appUpdate =>
       val plan = result(groupManager.updateApp(appId, updateOrCreate(appId, _, appUpdate), now, force))
 
       val response = plan.original.app(appId)
@@ -163,11 +173,12 @@ class AppsResource @Inject() (
     @DefaultValue("false")@QueryParam("force") force: Boolean,
     body: Array[Byte],
     @Context req: HttpServletRequest): Response = authenticated(req) { implicit identity =>
-    withValid(Json.parse(body).as[Seq[AppUpdate]].map(_.withCanonizedIds())) { updates =>
+    val appUpdates = Json.parse(body).as[Seq[raml.AppUpdate]].map(upd => AppUpdate.withCanonizedIds(preprocess(upd)))
+    withValid(appUpdates) { updates =>
       val version = clock.now()
 
       def updateGroup(root: Group): Group = updates.foldLeft(root) { (group, update) =>
-        update.id match {
+        update.id.map(PathId(_)) match {
           case Some(id) => group.updateApp(id, updateOrCreate(id, _, update), version)
           case None => group
         }
@@ -227,14 +238,18 @@ class AppsResource @Inject() (
   private def updateOrCreate(
     appId: PathId,
     existing: Option[AppDefinition],
-    appUpdate: AppUpdate)(implicit identity: Identity): AppDefinition = {
+    appUpdate: raml.AppUpdate)(implicit identity: Identity): AppDefinition = {
     def createApp(): AppDefinition = {
-      val app = validateOrThrow(appUpdate.empty(appId))
+      // TODO(jdef) if we convert (raml.AppUpdate, state.AppDefinition) to state.AppDefinition, then validation
+      // is required for models in addition to RAMLs :( :( :(   If we convert (raml.AppUdate, raml.App) to raml.App
+      // then we're implying a convertion from state.AppDefinition to raml.App in order to apply the update, validate,
+      // then convert back to AppDefinition (which seems proper but also more computing effort!)
+      val app = validateOrThrow(AppUpdate.withoutPriorAppDefinition(appUpdate, appId))
       checkAuthorization(CreateRunSpec, app)
     }
 
     def updateApp(current: AppDefinition): AppDefinition = {
-      val app = validateOrThrow(appUpdate(current))
+      val app = validateOrThrow(Raml.fromRaml((appUpdate, current)))
       checkAuthorization(UpdateRunSpec, app)
     }
 
@@ -246,7 +261,7 @@ class AppsResource @Inject() (
     }
 
     def updateOrRollback(current: AppDefinition): AppDefinition = appUpdate.version
-      .map(rollback(current, _))
+      .map(v => rollback(current, Timestamp(v)))
       .getOrElse(updateApp(current))
 
     existing match {
@@ -277,6 +292,12 @@ class AppsResource @Inject() (
 }
 
 object AppsResource {
+
+  def preprocess(ra: raml.App): raml.App = {
+    import mesosphere.marathon.api.v2.validation.AppValidation._
+    val withUpdatedContainer = ra.container.map(ct => ra.copy(container = Some(AppNormalization.normalizeDocker(ct)))).getOrElse(ra)
+    AppNormalization(Validation.validateOrThrow(withUpdatedContainer))
+  }
 
   def authzSelector(implicit authz: Authorizer, identity: Identity): AppSelector = Selector[AppDefinition] { app =>
     authz.isAuthorized(identity, ViewRunSpec, app)

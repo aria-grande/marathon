@@ -13,7 +13,7 @@ import mesosphere.marathon.api.v2.validation.NetworkValidation
 import mesosphere.marathon.core.externalvolume.ExternalVolumes
 import mesosphere.marathon.core.health._
 import mesosphere.marathon.core.plugin.PluginManager
-import mesosphere.marathon.core.pod.{ HostNetwork, Network }
+import mesosphere.marathon.core.pod.{ BridgeNetwork, ContainerNetwork, HostNetwork, Network }
 import mesosphere.marathon.core.readiness.ReadinessCheck
 import mesosphere.marathon.core.task.Task
 import mesosphere.marathon.plugin.validation.RunSpecValidator
@@ -61,7 +61,7 @@ case class AppDefinition(
 
   override val container: Option[Container] = AppDefinition.DefaultContainer,
 
-  healthChecks: Set[_ <: HealthCheck] = AppDefinition.DefaultHealthChecks,
+  healthChecks: Set[HealthCheck] = AppDefinition.DefaultHealthChecks,
 
   readinessChecks: Seq[ReadinessCheck] = AppDefinition.DefaultReadinessChecks,
 
@@ -272,10 +272,10 @@ case class AppDefinition(
   val hasDynamicServicePorts: Boolean = servicePorts.contains(AppDefinition.RandomPortValue)
 
   val networkModeBridge: Boolean =
-    container.exists(_.docker().exists(_.network.contains(mesos.ContainerInfo.DockerInfo.Network.BRIDGE)))
+    networks.collect { case _: BridgeNetwork => true }.nonEmpty // OK for now, as long as exclusive w/ container
 
   val networkModeUser: Boolean =
-    container.exists(_.docker().exists(_.network.contains(mesos.ContainerInfo.DockerInfo.Network.USER)))
+    networks.collect { case _: ContainerNetwork => true }.nonEmpty // OK for now, as long as exclusive w/ bridge
 
   def mergeFromProto(bytes: Array[Byte]): AppDefinition = {
     val proto = Protos.ServiceDefinition.parseFrom(bytes)
@@ -496,7 +496,7 @@ object AppDefinition extends GeneralPurposeCombinators {
     */
   val DefaultAcceptedResourceRoles = Set.empty[String]
 
-  val DefaultNetworks = Seq(HostNetwork)
+  val DefaultNetworks = Seq.empty[Network]
 
   val DefaultResidency = Option.empty[Residency]
 

@@ -28,6 +28,8 @@ object FetchUri {
 
   val empty: Seq[FetchUri] = Seq.empty
 
+  val defaultInstance = FetchUri("")
+
   def fromProto(uri: mesos.CommandInfo.URI): FetchUri =
     FetchUri(
       uri = uri.getValue,

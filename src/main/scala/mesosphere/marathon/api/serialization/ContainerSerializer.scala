@@ -16,6 +16,7 @@ object ContainerSerializer {
     } else if (proto.hasMesosAppC) {
       MesosAppCSerializer.fromProto(proto)
     } else {
+      // TODO(portMapping) save portMappings, see [[DockerSerializer]]
       Container.Mesos(
         volumes = proto.getVolumesList.map(Volume(_))(collection.breakOut)
       )
@@ -149,7 +150,6 @@ object DockerSerializer {
     Container.Docker(
       volumes = proto.getVolumesList.map(Volume(_))(collection.breakOut),
       image = d.getImage,
-      network = if (d.hasNetwork) Some(d.getNetwork) else None,
       portMappings = if (pms.nonEmpty) pms.map(PortMappingSerializer.fromProto).to[Seq] else Nil,
       privileged = d.getPrivileged,
       parameters = d.getParametersList.map(Parameter(_))(collection.breakOut),
@@ -164,8 +164,6 @@ object DockerSerializer {
       .addAllParameters(docker.parameters.map(ParameterSerializer.toMesos))
       .setForcePullImage(docker.forcePullImage)
 
-    docker.network.foreach(builder.setNetwork)
-
     docker.portMappings.foreach(mapping => builder.addPortMappings(PortMappingSerializer.toProto(mapping)))
 
     builder.build
@@ -175,8 +173,6 @@ object DockerSerializer {
     val builder = mesos.Protos.ContainerInfo.DockerInfo.newBuilder
 
     builder.setImage(docker.image)
-
-    docker.network.foreach(builder.setNetwork)
 
     docker.portMappings.foreach(mapping => builder.addAllPortMappings(PortMappingSerializer.toMesos(mapping)))
 
@@ -296,6 +292,7 @@ object CredentialSerializer {
   }
 }
 
+// TODO(portMapping) save portMappings, see [[DockerSerializer]]
 object MesosDockerSerializer {
   def fromProto(proto: Protos.ExtendedContainerInfo): Container.MesosDocker = {
     val d = proto.getMesosDocker
@@ -336,6 +333,7 @@ object MesosDockerSerializer {
   }
 }
 
+// TODO(portMapping) save portMappings, see [[DockerSerializer]]
 object MesosAppCSerializer {
   def fromProto(proto: Protos.ExtendedContainerInfo): Container.MesosAppC = {
     val appc = proto.getMesosAppC

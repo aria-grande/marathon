@@ -15,6 +15,7 @@ import mesosphere.marathon.api.{ AuthResource, MarathonMediaType }
 import mesosphere.marathon.core.appinfo.{ GroupInfo, GroupInfoService, Selector }
 import mesosphere.marathon.core.group.GroupManager
 import mesosphere.marathon.plugin.auth._
+import mesosphere.marathon.raml.{ GroupConversion, Raml }
 import mesosphere.marathon.state.PathId._
 import mesosphere.marathon.state._
 import mesosphere.marathon.stream._
@@ -48,6 +49,23 @@ class GroupsResource @Inject() (
   val ListRootVersionRE = """^versions$""".r
   val GetVersionRE = """^(.+)/versions/(.+)$""".r
   val GetRootVersionRE = """^versions/(.+)$""".r
+
+  /*
+  implicit lazy val GroupFormat: Format[Group] = (
+    (__ \ "id").format[PathId] ~
+    (__ \ "apps").formatNullable[Iterable[AppDefinition]].withDefault(Iterable.empty) ~
+    (__ \ "pods").formatNullable[Iterable[Pod]].withDefault(Iterable.empty) ~
+    (__ \ "groups").lazyFormatNullable(implicitly[Format[Iterable[Group]]]).withDefault(Iterable.empty) ~
+    (__ \ "dependencies").formatNullable[Set[PathId]].withDefault(Group.defaultDependencies) ~
+    (__ \ "version").formatNullable[Timestamp].withDefault(Group.defaultVersion)
+  ) (
+      (id, apps, pods, groups, dependencies, version) =>
+        Group(id = id, apps = apps.map(app => app.id -> app)(collection.breakOut),
+          pods.map(p => PathId(p.id).canonicalPath() -> Raml.fromRaml(p))(collection.breakOut),
+          groupsById = groups.map(group => group.id -> group)(collection.breakOut),
+          dependencies = dependencies, version = version),
+      { (g: Group) => (g.id, g.apps.values, g.pods.values.map(Raml.toRaml(_)), g.groups, g.dependencies, g.version) })
+  */
 
   /**
     * Get root group.
@@ -125,6 +143,17 @@ class GroupsResource @Inject() (
     body: Array[Byte],
     @Context req: HttpServletRequest): Response = createWithPath("", force, body, req)
 
+  def normalize(update: raml.GroupUpdate): raml.GroupUpdate = {
+    // TODO(jdef): recursion without tailrec
+    // would be nice if raml-generator used Set instead of Seq for apps and groups properties, then we could avoid this
+    // see RAML 1.0 spec's uniqueItems property (semantics are MUST be unique items).
+
+    // for now, enforce uniqueness this way (old GroupUpdate used Set)
+    val apps = update.apps.map(_.distinct)
+    val groups = update.groups.map(_.distinct.map(normalize))
+    update.copy(apps = apps, groups = groups)
+  }
+
   /**
     * Create a group.
     * If the path to the group does not exist, it gets created.
@@ -140,8 +169,10 @@ class GroupsResource @Inject() (
     @DefaultValue("false")@QueryParam("force") force: Boolean,
     body: Array[Byte],
     @Context req: HttpServletRequest): Response = authenticated(req) { implicit identity =>
-    withValid(Json.parse(body).as[GroupUpdate]) { groupUpdate =>
-      val effectivePath = groupUpdate.id.map(_.canonicalPath(id.toRootPath)).getOrElse(id.toRootPath)
+
+    val raw = Json.parse(body).as[raml.GroupUpdate]
+    withValid(normalize(raw)){ groupUpdate =>
+      val effectivePath = groupUpdate.id.map(PathId(_).canonicalPath(id.toRootPath)).getOrElse(id.toRootPath)
       val rootGroup = result(groupManager.rootGroup())
 
       def throwIfConflicting[A](conflict: Option[Any], msg: String) = {
@@ -186,7 +217,9 @@ class GroupsResource @Inject() (
     @DefaultValue("false")@QueryParam("dryRun") dryRun: Boolean,
     body: Array[Byte],
     @Context req: HttpServletRequest): Response = authenticated(req) { implicit identity =>
-    withValid(Json.parse(body).as[GroupUpdate]) { groupUpdate =>
+
+    val raw = Json.parse(body).as[raml.GroupUpdate]
+    withValid(normalize(raw)) { groupUpdate =>
       val newVersion = Timestamp.now()
 
       if (dryRun) {
@@ -256,9 +289,10 @@ class GroupsResource @Inject() (
 
   private def applyGroupUpdate(
     group: Group,
-    groupUpdate: GroupUpdate,
+    groupUpdate: raml.GroupUpdate,
     newVersion: Timestamp)(implicit identity: Identity) = {
-    def versionChange = groupUpdate.version.map { targetVersion =>
+    def versionChange = groupUpdate.version.map { version =>
+      val targetVersion = Timestamp(version)
       checkAuthorization(UpdateGroup, group)
       val versionedGroup = result(groupManager.group(group.id, targetVersion))
         .map(checkAuthorization(ViewGroup, _))
@@ -276,7 +310,8 @@ class GroupsResource @Inject() (
     def createOrUpdateChange = {
       // groupManager.update always passes a group, even if it doesn't exist
       val maybeExistingGroup = result(groupManager.group(group.id))
-      val updatedGroup = groupUpdate.apply(group, newVersion)
+      val updatedGroup: Group = Raml.fromRaml(
+        GroupConversion.UpdateGroupStructureOp(groupUpdate, group, newVersion) -> appsResourceContext)
 
       maybeExistingGroup match {
         case Some(existingGroup) => checkAuthorization(UpdateGroup, existingGroup)
@@ -291,11 +326,11 @@ class GroupsResource @Inject() (
 
   private def updateOrCreate(
     id: PathId,
-    update: GroupUpdate,
+    update: raml.GroupUpdate,
     force: Boolean)(implicit identity: Identity): (DeploymentPlan, PathId) = {
     val version = Timestamp.now()
 
-    val effectivePath = update.id.map(_.canonicalPath(id)).getOrElse(id)
+    val effectivePath = update.id.map(PathId(_).canonicalPath(id)).getOrElse(id)
     val deployment = result(groupManager.update(effectivePath, applyGroupUpdate(_, update, version), version, force))
     (deployment, effectivePath)
   }
@@ -310,7 +345,13 @@ class GroupsResource @Inject() (
 
 object GroupsResource {
 
+  val appsResourceContext: GroupConversion.Context = AppsResourceContext
+
   def authzSelector(implicit authz: Authorizer, identity: Identity) = Selector[Group] { g =>
     authz.isAuthorized(identity, ViewGroup, g)
+  }
+
+  object AppsResourceContext extends GroupConversion.Context {
+    override def preprocess(app: raml.App): AppDefinition = Raml.fromRaml(AppsResource.preprocess(app))
   }
 }
