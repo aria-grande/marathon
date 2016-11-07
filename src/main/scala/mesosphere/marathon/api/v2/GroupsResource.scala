@@ -149,9 +149,8 @@ class GroupsResource @Inject() (
     // see RAML 1.0 spec's uniqueItems property (semantics are MUST be unique items).
 
     // for now, enforce uniqueness this way (old GroupUpdate used Set)
-    val apps = update.apps.map(_.distinct)
-    val groups = update.groups.map(_.distinct.map(normalize))
-    update.copy(apps = apps, groups = groups)
+    val groups = update.groups.map(_.map(normalize))
+    update.copy(groups = groups)
   }
 
   /**

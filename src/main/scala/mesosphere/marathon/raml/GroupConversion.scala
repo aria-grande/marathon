@@ -32,7 +32,7 @@ object GroupConversion extends GroupConversion {
 
       val effectiveGroups = update.groups.fold(current.groupsById) { updates =>
         val currentIds = current.groupIds
-        val groupIds = updates.map(groupId(_).canonicalPath(current.id)).toSet
+        val groupIds = updates.map(groupId(_).canonicalPath(current.id))
         val changedIds = currentIds.intersect(groupIds)
         val changedIdList = changedIds.toList
         val groupUpdates = changedIdList
@@ -51,7 +51,7 @@ object GroupConversion extends GroupConversion {
           app.id -> app
         }(collection.breakOut)
 
-      val effectiveDependencies = update.dependencies.fold(current.dependencies)(_.map(PathId(_).canonicalPath(current.id)).toSet)
+      val effectiveDependencies = update.dependencies.fold(current.dependencies)(_.map(PathId(_).canonicalPath(current.id)))
       CoreGroup(current.id, effectiveApps, current.pods, effectiveGroups, effectiveDependencies, timestamp)
     }
   }
@@ -78,7 +78,7 @@ object GroupConversion extends GroupConversion {
       pods = Map.empty[PathId, PodDefinition],
       groups = update.groups.getOrElse(Seq.empty)
         .map(sub => toGroup(sub, groupId(sub).canonicalPath(gid), version)).toSet,
-      dependencies = update.dependencies.fold(Set.empty[PathId])(_.map(PathId(_).canonicalPath(gid)).toSet),
+      dependencies = update.dependencies.fold(Set.empty[PathId])(_.map(PathId(_).canonicalPath(gid))),
       version = version
     )
   }
