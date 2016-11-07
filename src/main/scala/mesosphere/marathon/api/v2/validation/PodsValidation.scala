@@ -2,16 +2,13 @@ package mesosphere.marathon
 package api.v2.validation
 
 // scalastyle:off
-import java.util.regex.Pattern
 
 import com.wix.accord.dsl._
 import com.wix.accord._
 import mesosphere.marathon.api.v2.Validation
-import mesosphere.marathon.raml.{ ArgvCommand, Artifact, CommandHealthCheck, Constraint, Endpoint, EnvVarSecretRef, EnvVarValueOrSecret, FixedPodScalingPolicy, HealthCheck, HttpHealthCheck, Image, ImageType, Lifecycle, Network, NetworkMode, Pod, PodContainer, PodPlacementPolicy, PodScalingPolicy, PodSchedulingBackoffStrategy, PodSchedulingPolicy, PodUpgradeStrategy, Resources, SecretDef, ShellCommand, TcpHealthCheck, Volume, VolumeMount }
-import mesosphere.marathon.state.{ PathId, ResourceRole }
+import mesosphere.marathon.raml.{ ArgvCommand, Artifact, CommandHealthCheck, Endpoint, FixedPodScalingPolicy, HealthCheck, HttpHealthCheck, Image, ImageType, Lifecycle, Network, NetworkMode, Pod, PodContainer, PodScalingPolicy, Resources, ShellCommand, TcpHealthCheck, Volume, VolumeMount }
+import mesosphere.marathon.state.PathId
 
-import scala.collection.immutable.Seq
-import scala.util.Try
 // scalastyle:on
 
 /**
@@ -20,34 +17,11 @@ import scala.util.Try
 @SuppressWarnings(Array("all")) // wix breaks stuff
 trait PodsValidation {
   import Validation._
+  import EnvVarValidation._
   import NameValidation._
   import NetworkValidation._
-
-  val EnvVarNamePattern = """^[A-Z_][A-Z0-9_]*$""".r
-
- val validEnvVarName: Validator[String] = validator[String] { name =>
-    name should matchRegexWithFailureMessage(
-      EnvVarNamePattern,
-      "must contain only alphanumeric chars or underscore, and must not begin with a number")
-    name.length should be > 0
-    name.length should be < 255
-  }
-
-  def envValidator(pod: Pod, enabledFeatures: Set[String]) = validator[Map[String, EnvVarValueOrSecret]] { env =>
-    env.keys is every(validEnvVarName)
-
-    // if the secrets feature is not enabled then don't allow EnvVarSecretRef's in the environment
-    env is isTrue("use of secret-references in the environment requires the secrets feature to be enabled") { env =>
-      if (!enabledFeatures.contains(Features.SECRETS))
-        env.values.count {
-          case _: EnvVarSecretRef => true
-          case _ => false
-        } == 0
-      else true
-    }
-
-    env is every(secretRefValidator(pod.secrets))
-  }
+  import SecretValidation._
+  import SchedulingValidator._
 
   val resourceValidator = validator[Resources] { resource =>
     resource.cpus should be >= 0.0
@@ -155,7 +129,7 @@ trait PodsValidation {
       container.resources is valid(resourceValidator)
       container.endpoints is every(endpointValidator(pod.networks))
       container.image.getOrElse(Image(ImageType.Docker, "abc")) is valid(imageValidator)
-      container.environment is envValidator(pod, enabledFeatures)
+      container.environment is envValidator(pod.secrets, enabledFeatures)
       container.healthCheck is optional(healthCheckValidator(container.endpoints))
       container.volumeMounts is every(volumeMountValidator(pod.volumes))
       container.artifacts is every(artifactValidator)
@@ -168,76 +142,6 @@ trait PodsValidation {
     containers.exists(_.volumeMounts.exists(_.name == v.name))
   }
 
-  val backoffStrategyValidator = validator[PodSchedulingBackoffStrategy] { bs =>
-    bs.backoff should be >= 0.0
-    bs.backoffFactor should be >= 0.0
-    bs.maxLaunchDelay should be >= 0.0
-  }
-
-  val upgradeStrategyValidator = validator[PodUpgradeStrategy] { us =>
-    us.maximumOverCapacity should be >= 0.0
-    us.maximumOverCapacity should be <= 1.0
-    us.minimumHealthCapacity should be >= 0.0
-    us.minimumHealthCapacity should be <= 1.0
-  }
-
-  val secretValidator = validator[Map[String, SecretDef]] { s =>
-    s.keys is every(notEmpty)
-    s.values.map(_.source) as "source" is every(notEmpty)
-  }
-
-  val complyWithConstraintRules: Validator[Constraint] = new Validator[Constraint] {
-    import mesosphere.marathon.raml.ConstraintOperator._
-    override def apply(c: Constraint): Result = {
-      if (c.fieldName.isEmpty) {
-        Failure(Set(RuleViolation(c, "Missing field and operator", None)))
-      } else {
-        c.operator match {
-          case Unique =>
-            c.value.fold[Result](Success) { _ => Failure(Set(RuleViolation(c, "Value specified but not used", None))) }
-          case Cluster =>
-            if (c.value.isEmpty || c.value.map(_.length).getOrElse(0) == 0) {
-              Failure(Set(RuleViolation(c, "Missing value", None)))
-            } else {
-              Success
-            }
-          case GroupBy | MaxPer =>
-            if (c.value.fold(true)(i => Try(i.toInt).isSuccess)) {
-              Success
-            } else {
-              Failure(Set(RuleViolation(
-                c,
-                "Value was specified but is not a number",
-                Some("GROUP_BY may either have no value or an integer value"))))
-            }
-          case Like | Unlike =>
-            c.value.fold[Result] {
-              Failure(Set(RuleViolation(c, "A regular expression value must be provided", None)))
-            } { p =>
-              Try(Pattern.compile(p)) match {
-                case util.Success(_) => Success
-                case util.Failure(e) =>
-                  Failure(Set(RuleViolation(
-                    c,
-                    s"'$p' is not a valid regular expression",
-                    Some(s"$p\n${e.getMessage}"))))
-              }
-            }
-        }
-      }
-    }
-  }
-
-  val placementStrategyValidator = validator[PodPlacementPolicy] { ppp =>
-    ppp.acceptedResourceRoles.toSet is empty or ResourceRole.validAcceptedResourceRoles(false)
-    ppp.constraints is empty or every(complyWithConstraintRules)
-  }
-
-  val schedulingValidator = validator[PodSchedulingPolicy] { psp =>
-    psp.backoff is optional(backoffStrategyValidator)
-    psp.upgrade is optional(upgradeStrategyValidator)
-    psp.placement is optional(placementStrategyValidator)
-  }
 
   val fixedPodScalingPolicyValidator = validator[FixedPodScalingPolicy] { f =>
     f.instances should be >= 0
@@ -251,17 +155,10 @@ trait PodsValidation {
     }
   }
 
-  def secretRefValidator(secrets: Map[String, SecretDef]) = validator[(String, EnvVarValueOrSecret)] { entry =>
-    entry._2 as s"${entry._1}" is isTrue("references an undefined secret"){
-      case ref: EnvVarSecretRef => secrets.contains(ref.secret)
-      case _ => true
-    }
-  }
-
   def podDefValidator(enabledFeatures: Set[String]): Validator[Pod] = validator[Pod] { pod =>
     PathId(pod.id) as "id" is valid and valid(PathId.absolutePathValidator)
     pod.user is optional(notEmpty)
-    pod.environment is envValidator(pod, enabledFeatures)
+    pod.environment is envValidator(pod.secrets, enabledFeatures)
     pod.volumes is every(volumeValidator(pod.containers)) and isTrue("volume names are unique") { volumes: Seq[Volume] =>
       val names = volumes.map(_.name)
       names.distinct.size == names.size

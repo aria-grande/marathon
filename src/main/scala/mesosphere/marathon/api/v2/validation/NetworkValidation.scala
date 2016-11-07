@@ -48,14 +48,14 @@ trait NetworkValidation {
       val realNamesAtMostOnce: Boolean = !nets.flatMap(_.name).groupBy(name => name).exists(_._2.size > 1)
       unnamedAtMostOnce && realNamesAtMostOnce
     } and isTrue[Seq[Network]]("Must specify either a single host network, single bridge network, or else 1-to-n container networks") { nets =>
-        val countsByMode = nets.groupBy { net => net.mode }.mapValues(_.size)
-        val hostNetworks = countsByMode.getOrElse(NetworkMode.Host, 0)
-        val bridgeNetworks = countsByMode.getOrElse(NetworkMode.ContainerBridge, 0)
-        val containerNetworks = countsByMode.getOrElse(NetworkMode.Container, 0)
-        (hostNetworks == 1 && bridgeNetworks == 0 && containerNetworks == 0) ||
-          (hostNetworks == 0 && bridgeNetworks == 1 && containerNetworks == 0) ||
-          (hostNetworks == 0 && bridgeNetworks == 0 &&  containerNetworks > 0)
-      }
+      val countsByMode = nets.groupBy { net => net.mode }.mapValues(_.size)
+      val hostNetworks = countsByMode.getOrElse(NetworkMode.Host, 0)
+      val bridgeNetworks = countsByMode.getOrElse(NetworkMode.ContainerBridge, 0)
+      val containerNetworks = countsByMode.getOrElse(NetworkMode.Container, 0)
+      (hostNetworks == 1 && bridgeNetworks == 0 && containerNetworks == 0) ||
+        (hostNetworks == 0 && bridgeNetworks == 1 && containerNetworks == 0) ||
+        (hostNetworks == 0 && bridgeNetworks == 0 && containerNetworks > 0)
+    }
 
   /** changes here should be reflected in [[ramlNetworksValidator]] */
   implicit val modelNetworksValidator: Validator[Seq[pod.Network]] =
@@ -66,18 +66,18 @@ trait NetworkValidation {
       }.flatten.groupBy(name => name).exists(_._2.size > 1)
       realNamesAtMostOnce
     } and isTrue[Seq[pod.Network]]("Must specify either a single host network, single bridge network, or else 1-to-n container networks") { nets =>
-        val countsByMode = nets.groupBy {
-          case pod.HostNetwork => "h"
-          case _: pod.BridgeNetwork => "b"
-          case _: pod.ContainerNetwork => "c"
-        }.mapValues(_.size)
-        val hostNetworks = countsByMode.getOrElse("h", 0)
-        val bridgeNetworks = countsByMode.getOrElse("b", 0)
-        val containerNetworks = countsByMode.getOrElse("c", 0)
-        (hostNetworks == 1 && bridgeNetworks == 0 && containerNetworks == 0) ||
-          (hostNetworks == 0 && bridgeNetworks == 1 && containerNetworks == 0) ||
-          (hostNetworks == 0 && bridgeNetworks == 0 &&  containerNetworks > 0)
-      }
+      val countsByMode = nets.groupBy {
+        case pod.HostNetwork => "h"
+        case _: pod.BridgeNetwork => "b"
+        case _: pod.ContainerNetwork => "c"
+      }.mapValues(_.size)
+      val hostNetworks = countsByMode.getOrElse("h", 0)
+      val bridgeNetworks = countsByMode.getOrElse("b", 0)
+      val containerNetworks = countsByMode.getOrElse("c", 0)
+      (hostNetworks == 1 && bridgeNetworks == 0 && containerNetworks == 0) ||
+        (hostNetworks == 0 && bridgeNetworks == 1 && containerNetworks == 0) ||
+        (hostNetworks == 0 && bridgeNetworks == 0 && containerNetworks > 0)
+    }
 }
 
 object NetworkValidation extends NetworkValidation
