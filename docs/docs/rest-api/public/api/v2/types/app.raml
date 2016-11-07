@@ -128,7 +128,9 @@ types:
           `/bin/sh -c ${app.cmd}`.
           Either `cmd` or `args` must be supplied.
           It is invalid to supply both `cmd` and `args` in the same app.
-      constraints?: constraints.AppConstraint[]
+      constraints?:
+        type: array
+        items: constraints.AppConstraint
       container?: appContainer.Container
       cpus?:
         type: number
@@ -153,7 +155,7 @@ types:
       env?: env.EnvVars
       executor?:
         type: string
-        pattern: ^(|\/\/cmd|\/?[^\/]+(\/[^\/]+)*)$
+        pattern: ^(//cmd)|(/?[^/]+(/[^/]+)*)|$
         description: |
           The executor to use to launch this application.
           Different executors are available.
