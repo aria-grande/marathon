@@ -69,6 +69,7 @@ types:
       acceptedResourceRoles?:
         type: array
         items: string
+        uniqueItems: true
         example: [public-facing]
         description: |
           A list of resource roles.
@@ -139,7 +140,9 @@ types:
           The number of CPU shares this application needs per instance. This number does not have to be integer, but can be a fraction.",
         minimum: 0.001
       dependencies?:
-        type: strings.PathId[]
+        type: array
+        items: strings.PathId
+        uniqueItems: true
         description: |
           A list of services upon which this application depends
           An order is derived from the dependencies for performing start/stop and
