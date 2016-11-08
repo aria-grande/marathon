@@ -87,15 +87,21 @@ trait AppNormalization {
     }
   }
 
-  // TODO(jdef) incorporate default network name
-  def apply(update: AppUpdate): AppUpdate = {
+  /**
+    * only deprecated fields and their interaction with canonical fields have been validated so far,
+    * so we limit normalization here to translating from the deprecated API to the canonical one.
+    *
+    * @return an API object in canonical form (read: doesn't use deprecated APIs)
+    */
+  def forDeprecatedFields(update: AppUpdate): AppUpdate = {
     val fetch = normalizeFetch(update.uris, update.fetch)
+    val container = update.container.map(normalizeDocker)
     val networks = NetworkTranslation.toNetworks(NetworkTranslation(
       update.ipAddress,
-      update.container.flatMap(_.docker.flatMap(_.network)),
+      container.flatMap(_.docker.flatMap(_.network)),
       update.networks
     ))
-    val container = normalizePortMappings(networks, update.container)
+
     val portDefinitions = update.portDefinitions.orElse(
       update.ports.map(_.map(port => PortDefinition(port = Some(port)))))
 
@@ -115,30 +121,49 @@ trait AppNormalization {
     )
   }
 
-  // TODO(jdef) incorporate default network name
-  def apply(before: App): App = {
-    val fetch: Seq[Artifact] = normalizeFetch(Option(before.uris), Option(before.fetch)).getOrElse(Nil)
+  def apply(update: AppUpdate, config: Config): AppUpdate = {
+    val networks = config.defaultNetworkName.map { _ =>
+      update.networks.map(_.map {
+        case n: Network if n.name.isEmpty && n.mode == NetworkMode.Container => n.copy(name = config.defaultNetworkName)
+        case n => n
+      })
+    }.getOrElse(update.networks)
+
+    val container = normalizePortMappings(update.networks, update.container)
+    update.copy(
+      container = container,
+      networks = networks
+    )
+  }
+
+  /**
+    * only deprecated fields and their interaction with canonical fields have been validated so far,
+    * so we limit normalization here to translating from the deprecated API to the canonical one.
+    *
+    * @return an API object in canonical form (read: doesn't use deprecated APIs)
+    */
+  def forDeprecatedFields(app: App): App = {
+    val fetch: Seq[Artifact] = normalizeFetch(Option(app.uris), Option(app.fetch)).getOrElse(Nil)
+    val container = app.container.map(normalizeDocker)
     val networks: Seq[ Network ] = NetworkTranslation.toNetworks(NetworkTranslation(
-      before.ipAddress,
-      before.container.flatMap(_.docker.flatMap(_.network)),
-      Some(before.networks)
+      app.ipAddress,
+      container.flatMap(_.docker.flatMap(_.network)),
+      Some(app.networks)
     )).getOrElse(Nil)
 
-    // Normally, our default is one port. If an ipAddress is defined that would lead to an error
+    // Normally, our default is one port. If an non-host networks are defined that would lead to an error
     // if left unchanged.
     def portDefinitions: Seq[PortDefinition] =
       if (networks.exists(_.mode != NetworkMode.Host))
         Nil
-      else if (before.portDefinitions.nonEmpty)
-        before.portDefinitions
-      else if (before.ports.nonEmpty)
-        before.ports.map(p => PortDefinition(port = Some(p)))
+      else if (app.portDefinitions.nonEmpty)
+        app.portDefinitions
+      else if (app.ports.nonEmpty)
+        app.ports.map(p => PortDefinition(port = Some(p)))
       else
         Seq(PortDefinition(port = Some(0)))
 
-    val container = normalizePortMappings(Some(networks), before.container)
-
-    before.copy(
+    app.copy(
       // normalize fetch
       fetch = fetch,
       uris = Nil,
@@ -150,12 +175,30 @@ trait AppNormalization {
       portDefinitions = portDefinitions,
       ports = Nil,
       // health checks
-      healthChecks = normalizeHealthChecks(before.healthChecks)
+      healthChecks = normalizeHealthChecks(app.healthChecks)
+    )
+  }
+
+  def apply(app: App, config: Config): App = {
+    val networks = config.defaultNetworkName.map { _ =>
+      app.networks.map {
+        case n: Network if n.name.isEmpty && n.mode == NetworkMode.Container => n.copy(name = config.defaultNetworkName)
+        case n => n
+      }
+    }.getOrElse(app.networks)
+
+    val container = normalizePortMappings(Some(app.networks), app.container)
+
+    app.copy(
+      container = container,
+      networks = networks
     )
   }
 }
 
 object AppNormalization extends AppNormalization {
+
+  case class Config(defaultNetworkName: Option[String])
 
   /**
     * attempt to translate an older app API (that uses ipAddress and container.docker.network) to the new API
@@ -179,7 +222,7 @@ object AppNormalization extends AppNormalization {
           case Bridge =>
             Some(Seq(Network(mode = NetworkMode.ContainerBridge, labels = ipAddress.labels)))
           case unsupported =>
-            throw SerializationFailedException(s"unsupported docker network type ${unsupported}")
+            throw SerializationFailedException(s"unsupported docker network type $unsupported")
         }
       case NetworkTranslation(Some(ipAddress), None, _) =>
         // wants ip/ct with some network mode.
@@ -191,7 +234,6 @@ object AppNormalization extends AppNormalization {
             Some(Seq(Network(mode = NetworkMode.Container, name = name)))
         }
       case NetworkTranslation(None, Some(networkType), _) =>
-        ???
         // user didn't ask for IP-per-CT, but specified a network type anyway
         import DockerNetwork._
         networkType match {
@@ -199,7 +241,7 @@ object AppNormalization extends AppNormalization {
           case User => Some(Seq(Network(mode = NetworkMode.Container)))
           case Bridge => Some(Seq(Network(mode = NetworkMode.ContainerBridge)))
           case unsupported =>
-            throw SerializationFailedException(s"unsupported docker network type ${unsupported}")
+            throw SerializationFailedException(s"unsupported docker network type $unsupported")
         }
       case NetworkTranslation(None, None, networks) =>
         // no deprecated APIs used! awesome, so use the canonical networks field

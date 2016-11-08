@@ -34,6 +34,10 @@ object Validation {
     }
   }
 
+  def implied[T](b: => Boolean)(implicit validator: Validator[T]): Validator[T] = new Validator[T] {
+    override def apply(t: T): Result = if (!b) Success else validator(t)
+  }
+
   def conditional[T](b: T => Boolean)(implicit validator: Validator[T]): Validator[T] = new Validator[T] {
     override def apply(t: T): Result = if (!b(t)) Success else validator(t)
   }
@@ -189,18 +193,18 @@ object Validation {
   def elementsAreUniqueBy[A, B](
     fn: A => B,
     errorMessage: String = "Elements must be unique.",
-    filter: B => Boolean = { _: B => true }): Validator[Seq[A]] = {
-    new Validator[Seq[A]] {
-      def apply(seq: Seq[A]) = areUnique(seq.map(fn).filter(filter), errorMessage)
+    filter: B => Boolean = { _: B => true }): Validator[Iterable[A]] = {
+    new Validator[Iterable[A]] {
+      def apply(seq: Iterable[A]) = areUnique(seq.map(fn).filter(filter).to[Seq], errorMessage)
     }
   }
 
   def elementsAreUniqueByOptional[A, B](
     fn: A => GenTraversableOnce[B],
     errorMessage: String = "Elements must be unique.",
-    filter: B => Boolean = { _: B => true }): Validator[Seq[A]] = {
-    new Validator[Seq[A]] {
-      def apply(seq: Seq[A]) = areUnique(seq.flatMap(fn).filter(filter), errorMessage)
+    filter: B => Boolean = { _: B => true }): Validator[Iterable[A]] = {
+    new Validator[Iterable[A]] {
+      def apply(seq: Iterable[A]) = areUnique(seq.flatMap(fn).filter(filter).to[Seq], errorMessage)
     }
   }
 

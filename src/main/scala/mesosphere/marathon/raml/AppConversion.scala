@@ -321,7 +321,7 @@ trait AppConversion extends EnvVarConversion with NetworkConversion with SecretC
       dependencies = app.dependencies.map(PathId(_))(collection.breakOut),
       upgradeStrategy = selectedStrategy.upgradeStrategy,
       labels = app.labels,
-      acceptedResourceRoles = app.acceptedResourceRoles.toSet,
+      acceptedResourceRoles = app.acceptedResourceRoles,
       networks = app.networks.map(Raml.fromRaml(_)),
       versionInfo = versionInfo,
       residency = selectedStrategy.residency,
@@ -362,7 +362,7 @@ trait AppConversion extends EnvVarConversion with NetworkConversion with SecretC
       dependencies = update.dependencies.fold(app.dependencies)(deps => deps.map(PathId(_).canonicalPath(app.id))(collection.breakOut)),
       upgradeStrategy = update.upgradeStrategy.fold(app.upgradeStrategy)(Raml.fromRaml(_)),
       labels = update.labels.getOrElse(app.labels),
-      acceptedResourceRoles = update.acceptedResourceRoles.fold(app.acceptedResourceRoles)(_.toSet),
+      acceptedResourceRoles = update.acceptedResourceRoles.getOrElse(app.acceptedResourceRoles),
       networks = update.networks.fold(app.networks)(nets => nets.map(Raml.fromRaml(_))),
       // versionInfo doesn't change - it's never overridden by an AppUpdate
       // Setting the version in AppUpdate means that the user wants to revert to that version. In that

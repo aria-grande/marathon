@@ -192,7 +192,7 @@ private[impl] object DVDIProviderValidations extends ExternalVolumeValidations {
     }
   }
 
-  override lazy val volume = {
+  object VolumeOptions {
     def optionalOption(options: Map[String, String], optionValidator: Validator[String]): Validator[String] =
       validator[String] { optionName => options.get(optionName) is optional(optionValidator) }
 
@@ -206,13 +206,28 @@ private[impl] object DVDIProviderValidations extends ExternalVolumeValidations {
         }
       }
     }
+  }
 
+  override lazy val volume = {
+    import VolumeOptions._
     validator[ExternalVolume] { v =>
       v.external.name is notEmpty
       v.external.provider is equalTo(name)
 
       v.external.options.get(driverOption) as s"external/options($quotedDriverOption)" is definedAnd(validLabel)
       v.external.options as "external/options" is
+        valid(conditional[Map[String, String]](_.get(driverOption).contains("rexray"))(validRexRayOptions))
+    }
+  }
+
+  override lazy val ramlVolume = {
+    import VolumeOptions._
+    validator[raml.ExternalVolume] { v =>
+      v.name is definedAnd(notEmpty)
+      v.provider is definedAnd(equalTo(name))
+
+      v.options.get(driverOption) as s"external/options($quotedDriverOption)" is definedAnd(validLabel)
+      v.options as "external/options" is
         valid(conditional[Map[String, String]](_.get(driverOption).contains("rexray"))(validRexRayOptions))
     }
   }

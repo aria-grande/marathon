@@ -1,7 +1,8 @@
-package mesosphere.marathon.core.externalvolume.impl
+package mesosphere.marathon
+package core.externalvolume.impl
 
 import com.wix.accord.Validator
-import mesosphere.marathon.state.{ ExternalVolume, AppDefinition, Group }
+import mesosphere.marathon.state.{ AppDefinition, ExternalVolume, Group }
 import org.apache.mesos.Protos.ContainerInfo
 
 /**
@@ -11,6 +12,7 @@ private[externalvolume] trait ExternalVolumeValidations {
   def rootGroup: Validator[Group]
   def app: Validator[AppDefinition]
   def volume: Validator[ExternalVolume]
+  def ramlVolume: Validator[raml.ExternalVolume]
 }
 
 /**

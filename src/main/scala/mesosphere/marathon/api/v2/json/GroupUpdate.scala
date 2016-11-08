@@ -11,6 +11,7 @@ object GroupUpdate {
 
   def empty(id: PathId): raml.GroupUpdate = raml.GroupUpdate(Some(id.toString))
 
+  /** requires that apps are in canonical form */
   def validNestedGroupUpdateWithBase(base: PathId, enabledFeatures: Set[String]): Validator[raml.GroupUpdate] =
     validator[raml.GroupUpdate] { group =>
       group is notNull

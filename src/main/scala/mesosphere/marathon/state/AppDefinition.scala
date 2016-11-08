@@ -267,6 +267,7 @@ case class AppDefinition(
   val servicePorts: Seq[Int] =
     container.withFilter(_.portMappings.nonEmpty).map(_.servicePorts).getOrElse(portNumbers)
 
+  /** should be kept in sync with [[mesosphere.marathon.api.v2.validation.AppValidation.portIndices]] */
   private val portIndices: Range = hostPorts.indices
 
   val hasDynamicServicePorts: Boolean = servicePorts.contains(AppDefinition.RandomPortValue)

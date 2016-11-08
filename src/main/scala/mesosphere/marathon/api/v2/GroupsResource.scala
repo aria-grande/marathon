@@ -35,6 +35,9 @@ class GroupsResource @Inject() (
 
   import GroupsResource._
 
+  val appNormalizationConfig = AppNormalization.Config(config.defaultNetworkName.get)
+  val appsResourceContext = AppsResourceContext(config.availableFeatures, appNormalizationConfig)
+
   /**
     * For backward compatibility, we embed always apps, pods, and groups if nothing is specified.
     */
@@ -145,12 +148,10 @@ class GroupsResource @Inject() (
 
   def normalize(update: raml.GroupUpdate): raml.GroupUpdate = {
     // TODO(jdef): recursion without tailrec
-    // would be nice if raml-generator used Set instead of Seq for apps and groups properties, then we could avoid this
-    // see RAML 1.0 spec's uniqueItems property (semantics are MUST be unique items).
-
-    // for now, enforce uniqueness this way (old GroupUpdate used Set)
+    // apps need to be in canonical form here
+    val apps = update.apps.map(_.map(appsResourceContext.preprocessor))
     val groups = update.groups.map(_.map(normalize))
-    update.copy(groups = groups)
+    update.copy(apps = apps, groups = groups)
   }
 
   /**
@@ -309,8 +310,9 @@ class GroupsResource @Inject() (
     def createOrUpdateChange = {
       // groupManager.update always passes a group, even if it doesn't exist
       val maybeExistingGroup = result(groupManager.group(group.id))
+      val groupConversionContext: GroupConversion.Context = appsResourceContext
       val updatedGroup: Group = Raml.fromRaml(
-        GroupConversion.UpdateGroupStructureOp(groupUpdate, group, newVersion) -> appsResourceContext)
+        GroupConversion.UpdateGroupStructureOp(groupUpdate, group, newVersion) -> groupConversionContext)
 
       maybeExistingGroup match {
         case Some(existingGroup) => checkAuthorization(UpdateGroup, existingGroup)
@@ -344,13 +346,17 @@ class GroupsResource @Inject() (
 
 object GroupsResource {
 
-  val appsResourceContext: GroupConversion.Context = AppsResourceContext
-
   def authzSelector(implicit authz: Authorizer, identity: Identity) = Selector[Group] { g =>
     authz.isAuthorized(identity, ViewGroup, g)
   }
 
-  object AppsResourceContext extends GroupConversion.Context {
-    override def preprocess(app: raml.App): AppDefinition = Raml.fromRaml(AppsResource.preprocess(app))
+  case class AppsResourceContext(enabledFeatures: Set[String], config: AppNormalization.Config)
+    extends GroupConversion.Context {
+
+    /** convert app to canonical form */
+    val preprocessor: (raml.App => raml.App) = AppsResource.preprocessor(enabledFeatures, config)
+
+    /** assumes that app is already in canonical form */
+    override def preprocess(app: raml.App): AppDefinition = Raml.fromRaml(app)
   }
 }

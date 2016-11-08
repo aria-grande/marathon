@@ -45,11 +45,16 @@ class AppsResource @Inject() (
 
   private[this] val ListApps = """^((?:.+/)|)\*$""".r
   implicit lazy val appDefinitionValidator = AppDefinition.validAppDefinition(config.availableFeatures)(pluginManager)
-  implicit lazy val appUpdateValidator = AppValidation.appUpdateValidator(config.availableFeatures)
+  implicit lazy val validateCanonicalAppUpdateAPI = AppValidation.validateCanonicalAppUpdateAPI(config.availableFeatures)
 
-  def preprocess(ra: raml.AppUpdate): raml.AppUpdate = {
-    val withUpdatedContainer = ra.container.map(ct => ra.copy(container = Some(AppNormalization.normalizeDocker(ct)))).getOrElse(ra)
-    AppNormalization(Validation.validateOrThrow(withUpdatedContainer))
+  val normalizationConfig = AppNormalization.Config(config.defaultNetworkName.get)
+  val preprocessApp: (raml.App => raml.App) = AppsResource.preprocessor(config.availableFeatures, normalizationConfig)
+
+  def preprocess(app: raml.AppUpdate): raml.AppUpdate = {
+    validateOrThrow(app)(AppValidation.validateOldAppUpdateAPI)
+    val migrated = AppNormalization.forDeprecatedFields(app)
+    validateOrThrow(app)(validateCanonicalAppUpdateAPI)
+    AppNormalization(migrated, normalizationConfig)
   }
 
   @GET
@@ -75,7 +80,7 @@ class AppsResource @Inject() (
     @DefaultValue("false")@QueryParam("force") force: Boolean,
     @Context req: HttpServletRequest): Response = authenticated(req) { implicit identity =>
 
-    val rawApp: AppDefinition = Raml.fromRaml(AppsResource.preprocess(Json.parse(body).as[raml.App]))
+    val rawApp: AppDefinition = Raml.fromRaml(preprocessApp(Json.parse(body).as[raml.App]))
     withValid(rawApp.withCanonizedIds()) { appDef =>
       val now = clock.now()
       val app = appDef.copy(versionInfo = VersionInfo.OnlyVersion(now))
@@ -293,10 +298,11 @@ class AppsResource @Inject() (
 
 object AppsResource {
 
-  def preprocess(ra: raml.App): raml.App = {
-    import mesosphere.marathon.api.v2.validation.AppValidation._
-    val withUpdatedContainer = ra.container.map(ct => ra.copy(container = Some(AppNormalization.normalizeDocker(ct)))).getOrElse(ra)
-    AppNormalization(Validation.validateOrThrow(withUpdatedContainer))
+  def preprocessor(enabledFeatures: Set[String], config: AppNormalization.Config): (raml.App => raml.App) = { app =>
+    validateOrThrow(app)(AppValidation.validateOldAppAPI)
+    val migrated = AppNormalization.forDeprecatedFields(app)
+    validateOrThrow(migrated)(AppValidation.validateCanonicalAppAPI(enabledFeatures))
+    AppNormalization(migrated, config)
   }
 
   def authzSelector(implicit authz: Authorizer, identity: Identity): AppSelector = Selector[AppDefinition] { app =>
