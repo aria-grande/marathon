@@ -278,7 +278,7 @@ class MarathonSchedulerActor private (
     val ids = plan.affectedRunSpecIds
 
     val res = withLockFor(ids) {
-      deploy(driver, plan)
+      deploy(plan)
     }
 
     res match {
@@ -308,9 +308,9 @@ class MarathonSchedulerActor private (
     }
   }
 
-  def deploy(driver: SchedulerDriver, plan: DeploymentPlan): Future[Unit] = {
+  def deploy(plan: DeploymentPlan): Future[Unit] = {
     deploymentRepository.store(plan).map { _ =>
-      deploymentManager ! PerformDeployment(driver, plan)
+      deploymentManager ! PerformDeployment(plan)
     }
   }
 

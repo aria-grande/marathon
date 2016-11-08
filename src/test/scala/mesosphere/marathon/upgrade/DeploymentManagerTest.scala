@@ -22,7 +22,7 @@ import mesosphere.marathon.storage.repository.legacy.store.{ InMemoryStore, Mara
 import mesosphere.marathon.test.{ MarathonActorSupport, MarathonTestHelper, Mockito }
 import mesosphere.marathon.upgrade.DeploymentActor.Cancel
 import mesosphere.marathon.upgrade.DeploymentManager.{ CancelDeployment, DeploymentFailed, PerformDeployment, StopAllDeployments }
-import mesosphere.marathon.{ MarathonConf, SchedulerActions }
+import mesosphere.marathon.{ MarathonConf, MarathonSchedulerDriverHolder, SchedulerActions }
 import org.apache.mesos.SchedulerDriver
 import org.rogach.scallop.ScallopConf
 import org.scalatest.concurrent.Eventually
@@ -51,7 +51,7 @@ class DeploymentManagerTest
     val plan = DeploymentPlan(oldGroup, newGroup)
 
     f.launchQueue.get(app.id) returns None
-    manager ! PerformDeployment(f.driver, plan)
+    manager ! PerformDeployment(plan)
 
     awaitCond(
       manager.underlyingActor.runningDeployments.contains(plan.id),
@@ -89,7 +89,7 @@ class DeploymentManagerTest
     val newGroup = Group("/".toRootPath, Map(app.id -> app))
     val plan = DeploymentPlan(oldGroup, newGroup)
 
-    manager ! PerformDeployment(f.driver, plan)
+    manager ! PerformDeployment(plan)
 
     manager ! CancelDeployment(plan.id)
 
@@ -104,8 +104,8 @@ class DeploymentManagerTest
     val app1 = AppDefinition("app1".toRootPath)
     val app2 = AppDefinition("app2".toRootPath)
     val oldGroup = Group("/".toRootPath)
-    manager ! PerformDeployment(f.driver, DeploymentPlan(oldGroup, Group("/".toRootPath, Map(app1.id -> app1))))
-    manager ! PerformDeployment(f.driver, DeploymentPlan(oldGroup, Group("/".toRootPath, Map(app2.id -> app2))))
+    manager ! PerformDeployment(DeploymentPlan(oldGroup, Group("/".toRootPath, Map(app1.id -> app1))))
+    manager ! PerformDeployment(DeploymentPlan(oldGroup, Group("/".toRootPath, Map(app2.id -> app2))))
     eventually(manager.underlyingActor.runningDeployments should have size 2)
 
     manager ! StopAllDeployments
@@ -117,6 +117,8 @@ class DeploymentManagerTest
   class Fixture {
 
     val driver: SchedulerDriver = mock[SchedulerDriver]
+    val holder: MarathonSchedulerDriverHolder = new MarathonSchedulerDriverHolder
+    holder.driver = Some(driver)
     val eventBus: EventStream = mock[EventStream]
     val launchQueue: LaunchQueue = mock[LaunchQueue]
     val config: MarathonConf = new ScallopConf(Seq("--master", "foo")) with MarathonConf {
@@ -137,7 +139,7 @@ class DeploymentManagerTest
     val readinessCheckExecutor: ReadinessCheckExecutor = mock[ReadinessCheckExecutor]
 
     def deploymentManager(): TestActorRef[DeploymentManager] = TestActorRef (
-      DeploymentManager.props(taskTracker, taskKillService, launchQueue, scheduler, storage, hcManager, eventBus, readinessCheckExecutor)
+      DeploymentManager.props(taskTracker, taskKillService, launchQueue, scheduler, storage, hcManager, eventBus, readinessCheckExecutor, holder)
     )
 
   }

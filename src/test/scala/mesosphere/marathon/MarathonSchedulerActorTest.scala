@@ -639,7 +639,8 @@ class MarathonSchedulerActorTest extends MarathonActorSupport
       storage,
       hcManager,
       system.eventStream,
-      readinessCheckExecutor
+      readinessCheckExecutor,
+      holder
     ))
 
     val historyActorProps: Props = Props(new HistoryActor(system.eventStream, taskFailureEventRepository))
